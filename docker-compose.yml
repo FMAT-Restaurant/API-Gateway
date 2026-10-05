@@ -1,0 +1,32 @@
+version: '3.8'
+
+networks:
+  restaurant-network:
+    name: restaurant-network
+    driver: bridge
+
+services:
+  kong:
+    image: kong:3.4-alpine
+    container_name: fmat-api-gateway
+    networks:
+      - restaurant-network
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_PLUGINS: "bundled,auth-perimeter"
+      KONG_LUA_PACKAGE_PATH: "/usr/local/custom-plugins/?.lua;/usr/local/share/lua/5.1/?.lua;;"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "${KONG_PROXY_PORT:-8000}:8000"
+      - "${KONG_ADMIN_PORT:-8001}:8001"
+    volumes:
+      - ./config/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+      - ./plugins/auth-perimeter:/usr/local/custom-plugins/kong/plugins/auth-perimeter:ro
+    restart: on-failure
