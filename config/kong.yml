@@ -22,7 +22,14 @@ services:
           - /api/v1/auth/setup-admin
           - /health
         strip_path: false
-
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 20
+              hour: 200
+              policy: local
+              fault_tolerant: true
+              
       # Rutas privadas de Auth (Staff, Me, Change Password)
       - name: auth-protected-routes
         paths:
