@@ -9,6 +9,7 @@ function AuthPerimeterHandler:access(conf)
   kong.service.request.clear_header("X-User-Id")
   kong.service.request.clear_header("X-Staff-Id")
   kong.service.request.clear_header("X-User-Roles")
+  kong.service.request.clear_header("X-User-Permissions")
 
   local jwt_claims = kong.ctx.shared.authenticated_jwt_token
   if not jwt_claims then
@@ -32,15 +33,19 @@ function AuthPerimeterHandler:access(conf)
   end
 
   if jwt_claims.sub then
-    kong.service.request.set_header("X-User-Id", jwt_claims.sub)
+    kong.service.request.set_header("X-User-Id", tostring(jwt_claims.sub))
   end
 
   if jwt_claims.staffId then
-    kong.service.request.set_header("X-Staff-Id", jwt_claims.staffId)
+    kong.service.request.set_header("X-Staff-Id", tostring(jwt_claims.staffId))
   end
 
   if jwt_claims.roles and type(jwt_claims.roles) == "table" then
     kong.service.request.set_header("X-User-Roles", table.concat(jwt_claims.roles, ","))
+  end
+
+  if jwt_claims.permissions and type(jwt_claims.permissions) == "table" then
+    kong.service.request.set_header("X-User-Permissions", table.concat(jwt_claims.permissions, ","))
   end
 end
 

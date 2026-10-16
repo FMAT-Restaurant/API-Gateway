@@ -5,21 +5,18 @@ consumers:
     jwt_secrets:
       - key: "urn:fmat:restaurant:auth"
         algorithm: HS256
-        secret: "${JWT_SECRET}"
+        secret: "{vault://env/jwt-secret}"
 
 services:
-  # ---------------------------------------------------------------------------
-  # Auth Microservice
-  # ---------------------------------------------------------------------------
   - name: auth-service
-    url: http://auth-backend:8080
+    url: http://auth-backend:3000
     routes:
-      # Rutas públicas (Login, Setup Admin, Health, Refresh)
       - name: auth-public-routes
         paths:
           - /api/v1/auth/login
           - /api/v1/auth/refresh
           - /api/v1/auth/setup-admin
+          - /api/v1/auth/setup-status
           - /health
         strip_path: false
         plugins:
@@ -29,11 +26,12 @@ services:
               hour: 200
               policy: local
               fault_tolerant: true
-              
-      # Rutas privadas de Auth (Staff, Me, Change Password)
+
       - name: auth-protected-routes
         paths:
           - /api/v1/auth/
+          - /api/v1/staff
+          - /api/v1/roles
         strip_path: false
         plugins:
           - name: jwt
@@ -42,9 +40,6 @@ services:
                 - exp
           - name: auth-perimeter
 
-  # ---------------------------------------------------------------------------
-  # Menu Microservice
-  # ---------------------------------------------------------------------------
   - name: menu-service
     url: http://menu-backend:8081
     routes:
@@ -59,15 +54,54 @@ services:
                 - exp
           - name: auth-perimeter
 
-  # ---------------------------------------------------------------------------
-  # Orders & KDS Microservice
-  # ---------------------------------------------------------------------------
   - name: orders-service
     url: http://orders-backend:8082
     routes:
       - name: orders-routes
         paths:
           - /api/v1/orders
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+          - name: auth-perimeter
+
+  - name: inventory-service
+    url: http://inventory-backend:8083
+    routes:
+      - name: inventory-routes
+        paths:
+          - /api/v1/inventory
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+          - name: auth-perimeter
+
+  - name: payments-service
+    url: http://payments-backend:8084
+    routes:
+      - name: payments-routes
+        paths:
+          - /api/v1/payments
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+          - name: auth-perimeter
+
+  - name: tables-service
+    url: http://tables-backend:8085
+    routes:
+      - name: tables-routes
+        paths:
+          - /api/v1/tables
         strip_path: false
         plugins:
           - name: jwt
@@ -85,6 +119,7 @@ plugins:
         - GET
         - POST
         - PUT
+        - PATCH
         - DELETE
         - OPTIONS
       headers:
