@@ -96,12 +96,12 @@ services:
                 - exp
           - name: auth-perimeter
 
-  - name: tables-service
-    url: http://tables-backend:8085
+  - name: floor-service
+    url: http://floor-backend:8085
     routes:
-      - name: tables-routes
+      - name: floor-routes
         paths:
-          - /api/v1/tables
+          - /api/v1/floor
         strip_path: false
         plugins:
           - name: jwt
