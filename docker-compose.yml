@@ -1,7 +1,9 @@
 networks:
+  # Red compartida con el resto de microservicios del restaurante.
+  # Se crea una sola vez de forma manual: docker network create restaurant-network
   restaurant-network:
     name: restaurant-network
-    driver: bridge
+    external: true
 
 services:
   kong:
@@ -11,7 +13,7 @@ services:
       - restaurant-network
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
       KONG_PLUGINS: "bundled,auth-perimeter"
       KONG_LUA_PACKAGE_PATH: "/usr/local/custom-plugins/?.lua;/usr/local/share/lua/5.1/?.lua;;"
       KONG_PROXY_ACCESS_LOG: /dev/stdout
@@ -25,6 +27,21 @@ services:
       - "${KONG_PROXY_PORT:-8000}:8000"
       - "${KONG_ADMIN_PORT:-8001}:8001"
     volumes:
-      - ./config/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+      - ./config/kong.yml:/usr/local/kong/declarative/kong.yml.template:ro
       - ./plugins/auth-perimeter:/usr/local/custom-plugins/kong/plugins/auth-perimeter:ro
+    # Kong 3.4 NO interpola variables de entorno en la configuracion declarativa.
+    # Por eso la plantilla se renderiza en el arranque sustituyendo ${JWT_SECRET}
+    # por el valor real de la variable de entorno.
+    command:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+        if [ -z "$$JWT_SECRET" ]; then
+          echo "ERROR: JWT_SECRET no esta definido (revisa el archivo .env)" >&2
+          exit 1
+        fi
+        perl -pe 's/\$\{JWT_SECRET\}/$$ENV{JWT_SECRET}/g' \
+          /usr/local/kong/declarative/kong.yml.template > /tmp/kong.yml
+        exec /docker-entrypoint.sh kong docker-start
     restart: on-failure

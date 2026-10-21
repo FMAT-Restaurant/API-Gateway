@@ -1,3 +1,7 @@
+# PLANTILLA de la configuracion declarativa de Kong.
+# Kong 3.4 NO interpola variables de entorno en este archivo, por lo que
+# ${JWT_SECRET} se sustituye en tiempo de arranque por el valor real de la
+# variable de entorno (ver el `command` del servicio kong en docker-compose.yml).
 _format_version: "3.0"
 
 consumers:
@@ -5,7 +9,7 @@ consumers:
     jwt_secrets:
       - key: "urn:fmat:restaurant:auth"
         algorithm: HS256
-        secret: "{vault://env/jwt-secret}"
+        secret: "${JWT_SECRET}"
 
 services:
   - name: auth-service
@@ -69,12 +73,12 @@ services:
           - name: auth-perimeter
 
   - name: inventory-service
-    url: http://inventory-backend:8083
+    url: http://inventory-backend:3000
     routes:
       - name: inventory-routes
         paths:
           - /api/v1/inventory
-        strip_path: false
+        strip_path: true
         plugins:
           - name: jwt
             config:
