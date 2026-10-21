@@ -1,7 +1,4 @@
-# PLANTILLA de la configuracion declarativa de Kong.
-# Kong 3.4 NO interpola variables de entorno en este archivo, por lo que
-# ${JWT_SECRET} se sustituye en tiempo de arranque por el valor real de la
-# variable de entorno (ver el `command` del servicio kong en docker-compose.yml).
+# Plantilla renderizada por config/render.lua antes de iniciar Kong.
 _format_version: "3.0"
 
 consumers:
@@ -9,19 +6,20 @@ consumers:
     jwt_secrets:
       - key: "urn:fmat:restaurant:auth"
         algorithm: HS256
-        secret: "${JWT_SECRET}"
+        secret: ${JWT_SECRET_JSON}
 
 services:
   - name: auth-service
     url: http://auth-backend:3000
     routes:
       - name: auth-public-routes
+        regex_priority: 100
         paths:
-          - /api/v1/auth/login
-          - /api/v1/auth/refresh
-          - /api/v1/auth/setup-admin
-          - /api/v1/auth/setup-status
-          - /health
+          - ~/api/v1/auth/login/?$
+          - ~/api/v1/auth/refresh/?$
+          - ~/api/v1/auth/setup-admin/?$
+          - ~/api/v1/auth/setup-status/?$
+          - ~/health/?$
         strip_path: false
         plugins:
           - name: rate-limiting
@@ -33,29 +31,35 @@ services:
 
       - name: auth-protected-routes
         paths:
-          - /api/v1/auth/
-          - /api/v1/staff
-          - /api/v1/roles
+          - ~/api/v1/(auth|staff|roles)(/|$)
         strip_path: false
         plugins:
           - name: jwt
             config:
+              key_claim_name: iss
               claims_to_verify:
                 - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
           - name: auth-perimeter
 
   - name: menu-service
-    url: http://menu-backend:8081
+    url: http://menu-backend:8080
     routes:
       - name: menu-routes
         paths:
-          - /api/v1/menu
+          - ~/api/v1/menu(/|$)
         strip_path: false
         plugins:
           - name: jwt
             config:
+              key_claim_name: iss
               claims_to_verify:
                 - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
           - name: auth-perimeter
 
   - name: orders-service
@@ -63,13 +67,17 @@ services:
     routes:
       - name: orders-routes
         paths:
-          - /api/v1/orders
+          - ~/api/v1/orders(/|$)
         strip_path: false
         plugins:
           - name: jwt
             config:
+              key_claim_name: iss
               claims_to_verify:
                 - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
           - name: auth-perimeter
 
   - name: inventory-service
@@ -77,13 +85,17 @@ services:
     routes:
       - name: inventory-routes
         paths:
-          - /api/v1/inventory
+          - ~/api/v1/inventory(/|$)
         strip_path: true
         plugins:
           - name: jwt
             config:
+              key_claim_name: iss
               claims_to_verify:
                 - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
           - name: auth-perimeter
 
   - name: payments-service
@@ -91,13 +103,17 @@ services:
     routes:
       - name: payments-routes
         paths:
-          - /api/v1/payments
+          - ~/api/v1/payments(/|$)
         strip_path: false
         plugins:
           - name: jwt
             config:
+              key_claim_name: iss
               claims_to_verify:
                 - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
           - name: auth-perimeter
 
   - name: floor-service
@@ -105,20 +121,29 @@ services:
     routes:
       - name: floor-routes
         paths:
-          - /api/v1/floor
+          - ~/api/v1/floor(/|$)
         strip_path: false
         plugins:
           - name: jwt
             config:
+              key_claim_name: iss
               claims_to_verify:
                 - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
           - name: auth-perimeter
 
 plugins:
+  - name: auth-perimeter
+    config:
+      require_jwt: false
   - name: cors
     config:
-      origins:
-        - "*"
+      origins: ${CORS_ORIGINS_JSON}
+      credentials: false
+      preflight_continue: false
+      max_age: 600
       methods:
         - GET
         - POST

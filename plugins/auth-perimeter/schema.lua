@@ -8,7 +8,10 @@ return {
     {
       config = {
         type = "record",
-        fields = {},
+        fields = {
+          { require_jwt = { type = "boolean", required = true, default = true } },
+          { issuer = { type = "string", required = true, default = "urn:fmat:restaurant:auth" } },
+        },
       },
     },
   },
