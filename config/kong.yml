@@ -173,3 +173,12 @@ plugins:
         - Accept
         - Authorization
         - Content-Type
+        - Idempotency-Key
+        - If-Match
+        - If-None-Match
+        - X-Request-Id
+        - X-Correlation-Id
+      exposed_headers:
+        - ETag
+        - Idempotency-Key
+        - Location
