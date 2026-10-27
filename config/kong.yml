@@ -10,7 +10,7 @@ consumers:
 
 services:
   - name: auth-service
-    url: http://auth-backend:3000
+    url: ${AUTH_SERVICE_URL}
     routes:
       - name: auth-public-routes
         regex_priority: 100
@@ -46,7 +46,7 @@ services:
           - name: auth-perimeter
 
   - name: menu-service
-    url: http://menu-backend:8080
+    url: ${MENU_SERVICE_URL}
     routes:
       - name: menu-routes
         paths:
@@ -64,7 +64,7 @@ services:
           - name: auth-perimeter
 
   - name: orders-service
-    url: http://orders-backend:8082
+    url: ${ORDERS_SERVICE_URL}
     routes:
       - name: orders-routes
         paths:
@@ -82,7 +82,7 @@ services:
           - name: auth-perimeter
 
   - name: inventory-service
-    url: http://inventory-backend:3000
+    url: ${INVENTORY_SERVICE_URL}
     routes:
       - name: inventory-routes
         paths:
@@ -98,9 +98,26 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+      - name: inventory-direct-routes
+        paths:
+          - ~/items(/|$)
+          - ~/suppliers(/|$)
+          - ~/recipes(/|$)
+          - ~/batches(/|$)
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
+          - name: auth-perimeter
 
   - name: payments-service
-    url: http://payments-backend:8084
+    url: ${PAYMENTS_SERVICE_URL}
     routes:
       - name: payments-routes
         paths:
@@ -118,7 +135,7 @@ services:
           - name: auth-perimeter
 
   - name: floor-service
-    url: http://floor-backend:8085
+    url: ${FLOOR_SERVICE_URL}
     routes:
       - name: floor-routes
         paths:

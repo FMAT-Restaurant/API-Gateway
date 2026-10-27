@@ -19,6 +19,12 @@ input:close()
 local values = {
   JWT_SECRET_JSON = assert(json.encode(secret)),
   CORS_ORIGINS_JSON = assert(json.encode(origins)),
+  AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL") or "http://auth-backend:3000",
+  MENU_SERVICE_URL = os.getenv("MENU_SERVICE_URL") or "http://menu-backend:8080",
+  INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL") or "http://inventory-backend:3000",
+  ORDERS_SERVICE_URL = os.getenv("ORDERS_SERVICE_URL") or "http://orders-backend:8082",
+  PAYMENTS_SERVICE_URL = os.getenv("PAYMENTS_SERVICE_URL") or "http://payments-backend:8084",
+  FLOOR_SERVICE_URL = os.getenv("FLOOR_SERVICE_URL") or "http://floor-backend:8085",
 }
 local rendered = template:gsub("%${([%w_]+)}", function(key)
   return assert(values[key], "Unknown template variable: " .. key)
