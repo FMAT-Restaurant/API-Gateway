@@ -1,354 +1,225 @@
-# FMAT-Restaurant — API Gateway (Kong 3.4 DB-less)
+# API Gateway del restaurante
 
-Punto único de entrada (*Single Entry Point*) y perímetro de seguridad para todos los microservicios del ecosistema **FMAT-Restaurant**.
+Gateway Kong 3.4 en modo **DB-less**. Las rutas, los destinos y los plugins se declaran en `config/kong.yml`. Este repositorio ejecuta únicamente el gateway: los seis backends se levantan por separado.
 
-Este repositorio contiene la configuración declarativa de **Kong Gateway 3.4** en modo *DB-less* y el plugin personalizado **`auth-perimeter`** (escrito en Lua), encargado de validar tokens JWT, bloquear cuentas con contraseña temporal y propagar la identidad y permisos PBAC hacia cada microservicio interno.
+## Inicio
 
----
+Requisitos: Docker Engine con Docker Compose v2 y los backends que se quieran consumir.
 
-## Tabla de Contenidos
+1. Copia `.env.example` a `.env`.
+2. Define `JWT_SECRET` con un secreto aleatorio de al menos 32 bytes, idéntico al utilizado por Auth-Backend para firmar los access tokens HS256. No lo incluyas en Git ni en variables del frontend. Puedes generarlo con `python -c "import secrets; print(secrets.token_hex(32))"`.
+3. Ajusta `CORS_ORIGINS` a los orígenes reales del frontend, separados por comas y sin rutas ni barra final.
+4. Ejecuta:
 
-1. [¿Qué hace el API Gateway por tu microservicio?](#1-qué-hace-el-api-gateway-por-tu-microservicio)
-2. [Arquitectura y Flujo de una Petición](#2-arquitectura-y-flujo-de-una-petición)
-3. [Inicio Rápido (Levantar el Gateway)](#3-inicio-rápido-levantar-el-gateway)
-4. [Tabla Maestra de Enrutamiento por Microservicio](#4-tabla-maestra-de-enrutamiento-por-microservicio)
-5. [Guía de Integración para Desarrolladores de Microservicios (Backend)](#5-guía-de-integración-para-desarrolladores-de-microservicios-backend)
-   - [5.1. Conectar tu Docker Compose a la red del Gateway](#51-conectar-tu-docker-compose-a-la-red-del-gateway)
-   - [5.2. Prefijos de ruta (`strip_path: false`)](#52-prefijos-de-ruta-strip_path-false)
-   - [5.3. Cabeceras HTTP inyectadas por el Gateway](#53-cabeceras-http-inyectadas-por-el-gateway)
-   - [5.4. Cómo autorizar acciones (PBAC) en tu microservicio](#54-cómo-autorizar-acciones-pbac-en-tu-microservicio)
-   - [5.5. Catálogo Oficial de Permisos por Microservicio](#55-catálogo-oficial-de-permisos-por-microservicio)
-6. [Guía para Desarrolladores de Frontend](#6-guía-para-desarrolladores-de-frontend)
-7. [Modo de Desarrollo Local Híbrido (Microservicio fuera de Docker)](#7-modo-de-desarrollo-local-híbrido-microservicio-fuera-de-docker)
-8. [Estructura del Repositorio y Modificación de Rutas](#8-estructura-del-repositorio-y-modificación-de-rutas)
-9. [Solución de Problemas Comunes (Troubleshooting)](#9-solución-de-problemas-comunes-troubleshooting)
-
----
-
-## 1. ¿Qué hace el API Gateway por tu microservicio?
-
-Como desarrollador de un microservicio (Menú, Órdenes/Cocina, Inventario, Pagos/Caja, Sala/Mesas o Auth), **no necesitas implementar validación criptográfica de JWT ni conectarte a la base de datos de usuarios**. El API Gateway realiza automáticamente:
-
-1. **CORS Global:** Habilita peticiones desde cualquier origen para los métodos `GET, POST, PUT, PATCH, DELETE, OPTIONS`.
-2. **Rate Limiting en Autenticación:** Protege las rutas públicas de login/registro contra ataques de fuerza bruta (`20 req/min` y `200 req/hora`).
-3. **Verificación Criptográfica de JWT (`HS256`):** Verifica la firma del token usando el `JWT_SECRET` compartido, comprueba que el emisor (`iss`) sea `urn:fmat:restaurant:auth` y valida que el token no haya expirado (`exp`).
-4. **Bloqueo Perimetral de Contraseñas Temporales (`auth-perimeter`):** Si un empleado inicia sesión con una contraseña temporal (`mustChangePassword: true`), el Gateway **bloquea con `403 Forbidden`** cualquier intento de consumir cualquier microservicio operativo hasta que cambie su contraseña.
-5. **Anti-Spoofing e Inyección de Identidad (`auth-perimeter`):** Limpia cualquier cabecera falsificada enviada por el cliente e inyecta cabeceras seguras (`X-User-Id`, `X-Staff-Id`, `X-User-Roles`, `X-User-Permissions`) hacia tu microservicio.
-
----
-
-## 2. Arquitectura y Flujo de una Petición
-
-```
-[ Cliente / Frontend ]
-         │
-         │  Authorization: Bearer <JWT>
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                API Gateway (Kong :8000)                     │
-│                                                             │
-│  1. ¿Ruta pública (/auth/login, /health, etc.)?             │
-│     └── Sí ──► Aplica Rate Limiting ──► Pasa a Auth-Backend │
-│                                                             │
-│  2. ¿Ruta protegida (/api/v1/menu, /orders, /inventory...)? │
-│     ├── Plugin JWT: Verifica firma HS256, iss y exp         │
-│     │   (Si falla ──► 401 Unauthorized)                     │
-│     │                                                       │
-│     └── Plugin auth-perimeter:                              │
-│         ├── Limpia headers X-User-* enviados por el cliente │
-│         ├── ¿mustChangePassword == true?                    │
-│         │   (Si no es ruta de cambio de clave ──► 403)      │
-│         └── Inyecta headers hacia el microservicio:         │
-│             • X-User-Id                                     │
-│             • X-Staff-Id                                    │
-│             • X-User-Roles                                  │
-│             • X-User-Permissions                            │
-└─────────────────────────────────────────────────────────────┘
-         │
-         │  Red interna Docker: restaurant-network
-         ▼
-┌─────────────────┬─────────────────┬──────────────────┬──────────────────┐
-│  auth-backend   │  menu-backend   │  orders-backend  │ inventory / etc. │
-│     :3000       │     :8081       │      :8082       │   :8083 - :8085  │
-└─────────────────┴─────────────────┴──────────────────┴──────────────────┘
+```sh
+docker compose up -d
+docker compose logs -f kong
 ```
 
----
+| Variable | Uso |
+| --- | --- |
+| `JWT_SECRET` | Obligatoria, sin valor predeterminado; mínimo 32 bytes. |
+| `CORS_ORIGINS` | Por defecto `http://localhost:5173,http://localhost:3000`. Orígenes HTTP/HTTPS explícitos con hostname o IPv4 y puerto opcional; sin comodines ni expresiones regulares. |
+| `KONG_PROXY_PORT` | Puerto del gateway para los clientes; por defecto `8000`. |
+| `KONG_ADMIN_PORT` | Puerto administrativo local; por defecto `8001`, publicado únicamente en `127.0.0.1`. |
 
-## 3. Inicio Rápido (Levantar el Gateway)
+Compose crea la red `restaurant-network`. Arranca el gateway antes de levantar otros proyectos que declaren esa red como externa. No ejecutes `docker compose down` del gateway mientras otros contenedores dependan de su red; para detenerlo conservándola usa `docker compose stop`.
 
-### Prerrequisitos
-- **Docker** y **Docker Compose** instalados.
+Al iniciar, `config/render.lua` genera la configuración de Kong en `/tmp/kong.yml` a partir de la plantilla y las variables de entorno. No montes la plantilla directamente como configuración final.
 
-### Pasos
+## Configuración del frontend
 
-1. **Clonar el repositorio:**
-   ```bash
-   git clone https://github.com/FMAT-Restaurant/API-Gateway.git
-   cd API-Gateway
-   ```
+La URL base debe apuntar al **proxy**, por ejemplo `http://localhost:8000` en desarrollo o `https://api.example.com` en un despliegue con TLS. `localhost` se refiere a la computadora del navegador; los nombres Docker de los backends no son direcciones públicas.
 
-2. **Configurar variables de entorno:**
-   Copia el archivo `.env.example` a `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-   Contenido de `.env`:
-   ```env
-   # Debe ser exactamente el mismo JWT_SECRET configurado en Auth-Backend
-   JWT_SECRET=super_secret_jwt_key_restaurant_auth_2026!
-   KONG_PROXY_PORT=8000
-   KONG_ADMIN_PORT=8001
-   ```
+Ejemplo para Vite:
 
-3. **Levantar el Gateway:**
-   ```bash
-   docker compose up -d
-   ```
-   > Al iniciar, este `docker-compose.yml` crea automáticamente la red puente llamada **`restaurant-network`**, a la cual deben unirse los contenedores de los demás microservicios.
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-4. **Verificar que Kong está corriendo:**
-   ```bash
-   curl http://localhost:8001/status
-   ```
-   - **Puerto Proxy (Tráfico de clientes y frontends):** `http://localhost:8000`
-   - **Puerto Admin de Kong (Diagnóstico local):** `http://localhost:8001`
+Para otro framework usa su mecanismo de configuración pública equivalente. El puerto debe coincidir con `KONG_PROXY_PORT`. Si incluyes `/api/v1` en tu URL base, no lo repitas al construir las rutas.
 
----
+```js
+const baseURL = import.meta.env.VITE_API_BASE_URL;
 
-## 4. Tabla Maestra de Enrutamiento por Microservicio
+// accessToken es el access token entregado por Auth-Backend.
+// Este repositorio no define el nombre del campo en la respuesta del login.
+export async function loadMenu(accessToken) {
+  const response = await fetch(`${baseURL}/api/v1/menu`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(`API: ${response.status}`);
+  return response.json();
+}
+```
 
-Todos los clientes o frontends consumen el Gateway en `http://localhost:8000`. Kong redirige el tráfico dentro de la red Docker `restaurant-network` según la siguiente tabla:
+- Realiza el login mediante `/api/v1/auth/login` usando el cuerpo que exija Auth-Backend. El gateway no define los DTO ni transforma las respuestas.
+- En rutas protegidas envía `Authorization: Bearer <access-token>`. No envíes el JWT en la URL, parámetros de consulta o cookies: el plugin JWT solo lee ese encabezado.
+- Configura el origen del frontend en `CORS_ORIGINS`; esquema, host y puerto forman parte del origen. `localhost` y `127.0.0.1` son orígenes distintos.
+- Se admiten por CORS `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` y los encabezados `Accept`, `Authorization`, `Content-Type`. Kong responde al preflight del navegador antes de autenticarlo.
+- La configuración actual usa `credentials: false`. Si Auth-Backend utiliza cookies para refresh, hay que adaptar CORS, el cliente (`credentials: "include"`) y los atributos de la cookie/CSRF al contrato real del backend; ese flujo no está configurado aquí. `cookie_names: []` solo controla de dónde se extrae el access token, no elimina cookies reenviadas al backend.
+- Un `401` puede indicar un token ausente, inválido, vencido o claims de identidad inválidos. Un `403` con `code: PASSWORD_CHANGE_REQUIRED` requiere llevar al usuario al cambio de contraseña inicial. No reintentes indefinidamente ni renueves ante cualquier `403`.
+- El frontend no configura `JWT_SECRET`, no firma tokens y no envía `X-User-*` ni `X-Staff-Id`: Kong elimina esos encabezados y los reconstruye desde el token validado.
 
-| Microservicio | Nombre en Kong | Prefijo Público (`:8000`) | Destino Interno en Docker (`host:puerto`) | ¿Requiere JWT? |
-| :--- | :--- | :--- | :--- | :---: |
-| **Autenticación (Público)** | `auth-service` | `/api/v1/auth/login`<br>`/api/v1/auth/refresh`<br>`/api/v1/auth/setup-admin`<br>`/api/v1/auth/setup-status`<br>`/health` | `http://auth-backend:3000` | No *(Rate-Limited)* |
-| **Autenticación, Personal y Roles** | `auth-service` | `/api/v1/auth/*`<br>`/api/v1/staff`<br>`/api/v1/roles` | `http://auth-backend:3000` | **Sí** |
-| **Menú y Carta** | `menu-service` | `/api/v1/menu` | `http://menu-backend:8081` | **Sí** |
-| **Órdenes y Cocina (POS / KDS)** | `orders-service` | `/api/v1/orders` | `http://orders-backend:8082` | **Sí** |
-| **Inventario y Almacén** | `inventory-service` | `/api/v1/inventory` | `http://inventory-backend:8083` | **Sí** |
-| **Pagos y Facturación (Caja)** | `payments-service` | `/api/v1/payments` | `http://payments-backend:8084` | **Sí** |
-| **Sala y Mesas (Floor)** | `floor-service` | `/api/v1/floor` | `http://floor-backend:8085` | **Sí** |
+## Rutas y destinos actuales
 
----
+| Servicio | Destino dentro de Docker | Ruta pública del gateway | Ruta enviada al backend | JWT |
+| --- | --- | --- | --- | --- |
+| Auth | `http://auth-backend:3000` | `/api/v1/auth/login`, `/api/v1/auth/refresh`, `/api/v1/auth/setup-admin`, `/api/v1/auth/setup-status`, `/health` | Sin cambios | No |
+| Auth | `http://auth-backend:3000` | `/api/v1/auth`, `/api/v1/staff`, `/api/v1/roles` y descendientes, salvo las excepciones anteriores | Sin cambios | Sí |
+| Menú | `http://menu-backend:8080` | `/api/v1/menu` y descendientes, incluido `/api/v1/menu/categories` | Sin cambios | Sí |
+| Órdenes | `http://orders-backend:8082` | `/api/v1/orders` y descendientes | Sin cambios | Sí |
+| Inventario | `http://inventory-backend:3000` | `/api/v1/inventory` y descendientes | Se elimina `/api/v1/inventory` | Sí |
+| Pagos | `http://payments-backend:8084` | `/api/v1/payments` y descendientes | Sin cambios | Sí |
+| Piso | `http://floor-backend:8085` | `/api/v1/floor` y descendientes | Sin cambios | Sí |
 
-## 5. Guía de Integración para Desarrolladores de Microservicios (Backend)
+Inventario conserva su contrato particular: `/api/v1/inventory/items?limit=10` llega como `/items?limit=10`. En los demás servicios `strip_path: false` conserva el prefijo público completo. Los puertos son los puertos **internos** donde escuchan las aplicaciones, independientemente de cualquier publicación en el host.
 
-Si eres responsable de uno de los microservicios del restaurante, sigue estos 4 puntos para integrarte con el API Gateway:
+Las rutas públicas aceptan una barra final opcional y no incluyen subrutas. Los prefijos protegidos incluyen sus descendientes. El backend valida el método HTTP de cada endpoint.
 
-### 5.1. Conectar tu Docker Compose a la red del Gateway
+Las rutas públicas de Auth comparten rate limiting de 20 solicitudes/minuto y 200/hora por IP, con política local. Los contadores no se comparten entre réplicas y `fault_tolerant: true` permite continuar si falla el contador. Si hay un proxy anterior, configura correctamente las IP confiables de Kong para contar al cliente real, sin confiar indiscriminadamente en `X-Forwarded-For`.
 
-Kong resuelve cada microservicio por su **nombre de servicio / alias en la red Docker `restaurant-network`** y su **puerto interno**:
-- `auth-backend` en el puerto interno `3000`
-- `menu-backend` en el puerto interno `8081`
-- `orders-backend` en el puerto interno `8082`
-- `inventory-backend` en el puerto interno `8083`
-- `payments-backend` en el puerto interno `8084`
-- `floor-backend` en el puerto interno `8085`
+## Configuración de un backend
 
-En el `docker-compose.yml` de tu microservicio, asegúrate de nombrar tu servicio exactamente como aparece arriba y conectarlo a la red externa `restaurant-network`:
+**No existe registro automático ni endpoint de registro.** En modo DB-less se agrega un `service` y sus `routes` al archivo declarativo y se recrea el contenedor del gateway.
+
+### Conectar un backend existente
+
+El proceso debe escuchar en `0.0.0.0:<puerto-interno>` y estar en `restaurant-network` con el nombre DNS o alias declarado en la tabla. Ejemplo de Compose en el repositorio de menú:
 
 ```yaml
 services:
-  # Ejemplo para el equipo de Menú (cambia el nombre y puerto según tu servicio)
   menu-backend:
     build: .
-    container_name: fmat-menu-backend
-    environment:
-      PORT: 8081
-    ports:
-      - "8081:8081" # Opcional para pruebas directas en host
+    expose:
+      - "8080"
     networks:
-      - default
-      - restaurant-network
+      restaurant-network:
+        aliases:
+          - menu-backend
 
 networks:
   restaurant-network:
     external: true
+    name: restaurant-network
 ```
 
-> **Importante:** Levanta primero el `API-Gateway` (`docker compose up -d`) para que la red `restaurant-network` ya exista cuando levantes tu microservicio, o créala manualmente una sola vez con `docker network create restaurant-network`.
+`expose` documenta el puerto interno; no es necesario publicar `ports` para que Kong lo alcance. Evita publicar los backends directamente si confían en los encabezados de identidad del gateway. La red compartida tampoco impide que otros contenedores de esa red contacten directamente al servicio: solo deben participar componentes confiables o debe añadirse aislamiento/autenticación entre servicios.
 
----
+### Agregar un servicio nuevo
 
-### 5.2. Prefijos de ruta (`strip_path: false`)
+Añade un elemento a `services` en `config/kong.yml`, ajustando DNS, puerto y prefijo:
 
-Todas las rutas en `config/kong.yml` tienen configurado **`strip_path: false`**.
-Esto significa que Kong **conserva la ruta completa** al reenviar la petición a tu contenedor:
-
-- Si el cliente pide `GET http://localhost:8000/api/v1/menu/items/42`
-- Tu microservicio recibirá `GET http://menu-backend:8081/api/v1/menu/items/42`
-
-Por lo tanto, configura el prefijo base de tu servidor/controladores en `/api/v1/<tu-servicio>`.
-
----
-
-### 5.3. Cabeceras HTTP inyectadas por el Gateway
-
-Cuando una petición pasa por el Gateway con un JWT válido, el plugin `auth-perimeter` elimina cualquier cabecera previa con el mismo nombre y añade las siguientes **4 cabeceras HTTP** a la petición que llega a tu microservicio:
-
-| Cabecera HTTP | Descripción | Ejemplo de Valor (Empleado) | Ejemplo de Valor (Admin) |
-| :--- | :--- | :--- | :--- |
-| `X-User-Id` | UUID único del usuario en el sistema (`sub` del JWT). | `b6e6f9c4-3a12-4d8e-9c01-8f22a1b4d5e6` | `a1b2c3d4-1111-2222-3333-444455556666` |
-| `X-Staff-Id` | Matrícula operativa del colaborador o administrador. | `E000104` | `ADM000001` |
-| `X-User-Roles` | Códigos de los roles asignados, separados por coma. | `MESERO,HOST` | `ADMINISTRADOR` |
-| `X-User-Permissions` | Permisos granulares PBAC asignados, separados por coma. | `orders:view,orders:create,menu:view,sala:tables:view` | `*` |
-
-> **Seguridad Anti-Spoofing:** Si un usuario externo intenta enviar manualmente un header `X-User-Permissions: *` desde Postman o el navegador, el plugin `auth-perimeter` lo borra al inicio de la petición (`kong.service.request.clear_header`) y lo sobrescribe exclusivamente con los claims firmados dentro del JWT.
-
----
-
-### 5.4. Cómo autorizar acciones (PBAC) en tu microservicio
-
-Nuestro sistema utiliza **PBAC (*Permission-Based Access Control*)** con roles dinámicos.
-- **Regla de Oro:** Tu microservicio **no debe validar nombres de roles fijos** (como `if role == 'MESERO'`), porque el Administrador puede crear roles personalizados desde la interfaz (ej. `SUBGERENTE_NOCTURNO` o `CAJERO_EVENTOS`) con combinaciones específicas de permisos.
-- En su lugar, tu microservicio debe validar **si el header `X-User-Permissions` incluye el permiso requerido para ese endpoint o el comodín `*`** (que representa acceso total de Administrador).
-
-#### Ejemplo en Node.js / Express / NestJS
-```typescript
-function requirePermission(requiredPermission: string) {
-  return (req, res, next) => {
-    const rawPermissions = req.headers['x-user-permissions'] as string | undefined;
-    if (!rawPermissions) {
-      return res.status(401).json({ message: 'No autenticado: cabeceras de Gateway ausentes' });
-    }
-
-    const permissions = rawPermissions.split(',').map((p) => p.trim());
-
-    // El Administrador tiene el comodín '*' que otorga todos los permisos
-    if (permissions.includes('*') || permissions.includes(requiredPermission)) {
-      return next();
-    }
-
-    return res.status(403).json({
-      message: `Permiso insuficiente. Se requiere: ${requiredPermission}`,
-    });
-  };
-}
-
-// Uso en una ruta de Inventario:
-// app.post('/api/v1/inventory/ingredients', requirePermission('inventory:ingredients:create'), controller);
+```yaml
+  - name: reports-service
+    url: http://reports-backend:8086
+    routes:
+      - name: reports-routes
+        paths:
+          - ~/api/v1/reports(/|$)
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              header_names: [Authorization]
+              uri_param_names: []
+              cookie_names: []
+          - name: auth-perimeter
 ```
 
-#### Ejemplo en Python (FastAPI)
-```python
-from fastapi import Header, HTTPException, Depends
+Mantén **ambos plugins** en cada ruta protegida. `jwt` valida firma y expiración; `auth-perimeter`, cuya configuración predeterminada exige JWT, aplica el contrato de identidad y el bloqueo por contraseña temporal. La instancia global de `auth-perimeter` solo limpia encabezados de peticiones públicas; por sí sola no protege un servicio nuevo.
 
-def require_permission(required_permission: str):
-    def dependency(x_user_permissions: str | None = Header(default=None)):
-        if not x_user_permissions:
-            raise HTTPException(status_code=401, detail="Cabeceras de Gateway ausentes")
-        permissions = [p.strip() for p in x_user_permissions.split(",")]
-        if "*" not in permissions and required_permission not in permissions:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Permiso insuficiente. Se requiere: {required_permission}"
-            )
-    return Depends(dependency)
+Tras modificar configuración o variables:
 
-# Uso en un endpoint de Órdenes:
-# @app.post("/api/v1/orders", dependencies=[require_permission("orders:create")])
+```sh
+docker compose up -d --force-recreate kong
 ```
 
----
+No uses operaciones CRUD de la Admin API para registrar servicios en esta configuración DB-less. El archivo declarativo es la fuente persistente de configuración.
 
-### 5.5. Catálogo Oficial de Permisos por Microservicio
+## Contrato de Auth-Backend y autorización
 
-Estos son los códigos de permisos que emite `Auth-Backend` en el JWT y que llegan en `X-User-Permissions`:
+Auth-Backend debe firmar access tokens con **HS256**, con el mismo secreto literal que Kong, sin decodificación base64 del secreto, y emitir estos claims:
 
-| Microservicio / Dominio | Código de Permiso (`X-User-Permissions`) | Acción que autoriza |
-| :--- | :--- | :--- |
-| **Administrador Global** | `*` | Acceso total irrestricto a todos los microservicios y acciones. |
-| **Inventario (`inventory-service`)** | `inventory:view` | Consultar existencias y stock de ingredientes. |
-| | `inventory:ingredients:create` | Registrar nuevos insumos y productos en bodega. |
-| | `inventory:stock:update_status` | Modificar cantidades, mermas y estados de stock. |
-| | `inventory:ingredients:delete` | Dar de baja materias primas de la base de datos. |
-| **Cocina (`orders-service` / KDS)** | `kitchen:kds:view` | Visualizar comandas en pantalla de cocina (KDS) y tiempos. |
-| | `kitchen:order:start_preparation` | Marcar platillos como "en preparación / cocción". |
-| | `kitchen:order:mark_ready` | Marcar que la orden está lista para servir. |
-| **Pedidos / POS (`orders-service`)** | `orders:view` | Consultar órdenes en curso y detalle de comandas. |
-| | `orders:create` | Abrir nuevas órdenes y capturar platillos. |
-| | `orders:cancel` | Anular comandas o platillos. |
-| **Menú (`menu-service`)** | `menu:view` | Consultar carta, platillos y catálogo de precios. |
-| | `menu:edit` | Crear/editar platillos, precios, recetas y disponibilidad. |
-| **Sala y Mesas (`floor-service`)** | `sala:tables:view` | Consultar mapa de mesas y estados (libre/ocupada). |
-| | `sala:tables:assign_diner` | Asignar comensales a mesas disponibles. |
-| | `sala:tables:assign_waiter` | Vincular mesero responsable a una mesa. |
-| **Caja y Pagos (`payments-service`)** | `billing:invoices:create` | Procesar cobros, emitir tickets de pago y facturas. |
-| | `billing:reports:view` | Consultar ingresos del turno y arqueo de caja. |
-| **Personal y Roles (`auth-service`)** | `staff:view` | Consultar lista de colaboradores y perfiles. |
-| | `staff:manage` | Crear/editar colaboradores, restablecer claves y gestionar roles. |
+| Claim | Requisito |
+| --- | --- |
+| `iss` | Obligatorio: `urn:fmat:restaurant:auth`, coincidente con la credencial JWT y el emisor esperado por el plugin. |
+| `exp` | Obligatorio: fecha de expiración como número de segundos Unix, validada por Kong. |
+| `sub` | Obligatorio: identificador del usuario como cadena no vacía. |
+| `staffId` | Opcional: cadena no vacía o número entero. |
+| `roles` | Opcional: arreglo de cadenas no vacías. |
+| `permissions` | Opcional: arreglo de cadenas no vacías. |
+| `mustChangePassword` | Opcional: booleano; cuando es `true`, restringe las rutas protegidas. |
 
----
+Los valores propagados como identidad no admiten caracteres de control ni comas; roles y permisos se separan por comas. Un claim inválido produce `401`.
 
-## 6. Guía para Desarrolladores de Frontend
+Ejemplo de payload, con `exp` calculado al emitir el token:
 
-1. **URL Base Única:**
-   Configura tu variable de entorno para apuntar al puerto Proxy del Gateway (`8000`):
-   ```env
-   VITE_API_BASE_URL=http://localhost:8000/api/v1
-   ```
-
-2. **Envío del Token JWT:**
-   En todas las rutas protegidas, envía el `accessToken` obtenido en `/api/v1/auth/login` mediante la cabecera estándar:
-   ```http
-   Authorization: Bearer <accessToken>
-   ```
-
-3. **Códigos de Estado emitidos por el Gateway:**
-   - **`401 Unauthorized`:** El token no fue enviado, la firma es inválida o el token expiró (`exp`). El frontend debe invocar `POST /api/v1/auth/refresh` para obtener un nuevo token.
-   - **`403 Forbidden` con `code: "PASSWORD_CHANGE_REQUIRED"`:** El usuario tiene una contraseña temporal (`mustChangePassword: true`). El Gateway solo le permitirá llamar a:
-     - `POST /api/v1/auth/change-initial-password`
-     - `GET /api/v1/auth/me`
-     - `POST /api/v1/auth/logout`
-   - **`429 Too Many Requests`:** Se superó el límite de peticiones en rutas públicas de autenticación (máximo 20 por minuto).
-
----
-
-## 7. Modo de Desarrollo Local Híbrido (Microservicio fuera de Docker)
-
-Si estás desarrollando tu microservicio directamente en tu máquina (`npm run start:dev`, `uvicorn`, `go run`, etc.) en lugar de correrlo dentro de un contenedor Docker, Kong (que corre dentro de Docker) no encontrará el hostname `menu-backend` o `orders-backend`.
-
-Para probar tu microservicio local a través del Gateway:
-1. En `config/kong.yml`, cambia temporalmente el host de tu servicio por `host.docker.internal`:
-   ```yaml
-   - name: menu-service
-     url: http://host.docker.internal:8081 # Apunta al puerto 8081 de tu máquina host
-   ```
-2. Reinicia el contenedor del Gateway para aplicar el cambio:
-   ```bash
-   docker compose restart kong
-   ```
-*(Recuerda no subir a `main` el cambio a `host.docker.internal` para mantener la compatibilidad entre contenedores).*
-
----
-
-## 8. Estructura del Repositorio y Modificación de Rutas
-
-```text
-API-Gateway/
-├── .env.example                        # Plantilla de variables de entorno
-├── docker-compose.yml                  # Definición de Kong 3.4 DB-less y red restaurant-network
-├── config/
-│   └── kong.yml                        # Configuración declarativa de servicios, rutas, CORS y JWT
-└── plugins/
-    └── auth-perimeter/
-        ├── handler.lua                 # Lógica de bloqueo de clave temporal e inyección de X-User-*
-        └── schema.lua                  # Esquema del plugin para Kong
+```js
+const claims = {
+  iss: "urn:fmat:restaurant:auth",
+  sub: String(user.id),
+  staffId: String(staff.id),
+  roles: ["waiter"],
+  permissions: ["orders:read"],
+  mustChangePassword: false,
+  exp: Math.floor(Date.now() / 1000) + 900,
+};
 ```
 
-### ¿Cómo agregar un nuevo endpoint o ruta a un microservicio existente?
-Si el nuevo endpoint está bajo el mismo prefijo (por ejemplo, `/api/v1/orders/kitchen-queue` dentro de `/api/v1/orders`), **no necesitas tocar el API Gateway**: Kong ya redirige automáticamente cualquier subruta que comience con `/api/v1/orders` hacia `http://orders-backend:8082`.
+Kong propaga `sub` como `X-User-Id`, `staffId` como `X-Staff-Id`, y los arreglos como `X-User-Roles` y `X-User-Permissions`. Los campos opcionales ausentes no generan encabezado. El consumer `fmat-auth-service` identifica la credencial del emisor; no representa al usuario final.
 
-Si tu microservicio necesita exponer una **ruta pública sin JWT** (por ejemplo, un webhook o healthcheck), agrégala en `config/kong.yml` como una ruta separada sin los plugins `jwt` ni `auth-perimeter`, y ejecuta `docker compose restart kong`.
+Con `mustChangePassword: true`, únicamente se permite acceder a estas rutas protegidas (también con barra final):
 
----
+- `POST /api/v1/auth/change-initial-password`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
 
-## 9. Solución de Problemas Comunes (Troubleshooting)
+El resto devuelve `403` con `code: PASSWORD_CHANGE_REQUIRED`. Las rutas públicas permanecen públicas. Después del cambio, Auth-Backend debe emitir un nuevo token con el estado actualizado; Kong no consulta la base de datos de usuarios.
 
-| Síntoma / Error | Causa Probable | Solución |
-| :--- | :--- | :--- |
-| **`502 Bad Gateway`** o **`503 Service Unavailable`** al llamar a `/api/v1/<servicio>` | El contenedor del microservicio destino está apagado o no está conectado a `restaurant-network`. | Verifica que tu contenedor esté corriendo (`docker ps`), que se llame igual que en `config/kong.yml` (ej. `orders-backend`) y que esté en la red `restaurant-network` (`docker network inspect restaurant-network`). |
-| **`401 Unauthorized` (`Invalid signature`)** aunque el usuario acaba de iniciar sesión | El `JWT_SECRET` del `.env` en `API-Gateway` no coincide con el `JWT_SECRET` de `Auth-Backend`. | Asegúrate de que ambos usen exactamente el mismo valor (`super_secret_jwt_key_restaurant_auth_2026!`) y reinicia Kong (`docker compose restart kong`). |
-| **`401 Unauthorized` (`No credentials found for given 'iss'`)** | El JWT no incluye el claim `"iss": "urn:fmat:restaurant:auth"`. | Asegúrate de tener `Auth-Backend` actualizado a la última versión de `main`. |
-| **`404 Not Found` (de Kong: `no Route matched with those values`)** | Estás llamando a una URL sin el prefijo `/api/v1/...`. | Todas las rutas de microservicios llevan el prefijo `/api/v1/` (ej. `http://localhost:8000/api/v1/menu`). |
+Cada backend debe comprobar permisos, roles, pertenencia y acceso a recursos. El gateway **no implementa autorización por endpoint**, revocación de tokens, audiencia (`aud`) ni consulta de sesiones. Un logout no invalida por sí solo un access token ya emitido. No uses refresh tokens intercambiables con access tokens: utiliza tokens opacos o una credencial de firma distinta no aceptada por el gateway y valida el refresh en Auth-Backend. Los servicios distintos de Auth no necesitan conocer el secreto si usan exclusivamente la identidad del perímetro confiable.
+
+`setup-admin` está expuesto sin JWT por diseño de la ruta. Auth-Backend debe permitir la inicialización solo una vez y de forma atómica; el rate limiting no garantiza esa condición. El cuerpo de login/refresh, el almacenamiento de tokens y esa lógica de inicialización pertenecen a Auth-Backend y no están implementados en este repositorio.
+
+## Verificación y diagnóstico
+
+Pruebas locales del plugin y del renderizador, ejecutadas con Lua 5.1 mediante Lupa y un PDK de Kong simulado:
+
+```sh
+python -m pip install -r tests/requirements.txt
+python -m unittest discover -s tests -v
+```
+
+Con Docker disponible, valida la configuración renderizada y el esquema de Kong:
+
+```sh
+docker compose exec kong kong config parse /tmp/kong.yml
+docker compose exec kong kong health
+```
+
+`config parse` puede imprimir configuración sensible: no compartas su salida ni la guardes en logs públicos. Prueba también estos escenarios con tus backends activos:
+
+```sh
+# Salud de Auth-Backend a través del gateway; no es la salud interna de Kong.
+curl -i http://localhost:8000/health
+
+# Debe rechazar el acceso protegido sin token.
+curl -i http://localhost:8000/api/v1/menu
+
+# Preflight: debe responder con el origen y encabezados CORS permitidos.
+curl -i -X OPTIONS http://localhost:8000/api/v1/menu -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: Authorization"
+```
+
+Comprueba además acceso con un token válido, rechazo de tokens vencidos/firma incorrecta, bloqueo con contraseña temporal y que el backend reciba identidad del token aunque el cliente envíe encabezados falsificados.
+
+- `404`: no coincide una ruta del gateway, o el backend no implementa la ruta recibida.
+- `401`: token o identidad inválida/ausente en una ruta protegida.
+- `403` con `PASSWORD_CHANGE_REQUIRED`: contraseña temporal pendiente.
+- `429`: límite de solicitudes alcanzado en una ruta pública.
+- `502`/`503`: revisa DNS Docker, red, puerto interno, proceso y disponibilidad del backend.
+- Error CORS del navegador: verifica el origen exacto, los métodos/encabezados y que la petición llegue al gateway.
+
+El proxy de este Compose escucha HTTP en `8000`; para producción configura TLS en Kong o en un proxy frontal. La Admin API sigue accesible desde la red interna Docker y desde el host local: no la publiques en Internet. El ciclo de vida de la imagen Kong y su versión de parche deben gestionarse y verificarse antes de desplegar.

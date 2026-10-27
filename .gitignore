@@ -1,3 +1,6 @@
 .env
 *.log
 .DS_Store
+.tmp-test-deps/
+__pycache__/
+.pytest_cache/
