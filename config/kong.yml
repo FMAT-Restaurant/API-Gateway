@@ -51,6 +51,7 @@ services:
       - name: menu-routes
         paths:
           - ~/api/v1/menu(/|$)
+          - ~/api/v1/media(/|$)
         strip_path: false
         plugins:
           - name: jwt

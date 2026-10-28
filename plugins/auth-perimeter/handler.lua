@@ -94,6 +94,11 @@ function AuthPerimeterHandler:access(conf)
   if jwt_claims.permissions and type(jwt_claims.permissions) == "table" then
     kong.service.request.set_header("X-User-Permissions", table.concat(jwt_claims.permissions, ","))
   end
+
+  local raw_path = kong.request.get_path()
+  if raw_path:find("^/api/v1/menu/media") then
+    kong.service.request.set_path((raw_path:gsub("^/api/v1/menu/media", "/api/v1/media")))
+  end
 end
 
 return AuthPerimeterHandler
