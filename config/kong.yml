@@ -105,6 +105,8 @@ services:
           - ~/suppliers(/|$)
           - ~/recipes(/|$)
           - ~/batches(/|$)
+          - ~/movements(/|$)
+          - ~/reservations(/|$)
         strip_path: false
         plugins:
           - name: jwt
