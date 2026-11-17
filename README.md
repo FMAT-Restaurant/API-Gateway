@@ -65,11 +65,12 @@ export async function loadMenu(accessToken) {
 
 | Servicio | Destino dentro de Docker | Ruta pública del gateway | Ruta enviada al backend | JWT |
 | --- | --- | --- | --- | --- |
-| Auth | `http://auth-backend:3000` | `/api/v1/auth/login`, `/api/v1/auth/refresh`, `/api/v1/auth/setup-admin`, `/api/v1/auth/setup-status`, `/health` | Sin cambios | No |
+| Auth | `http://auth-backend:3000` | `/api/v1/auth/login`, `/api/v1/auth/refresh`, `/api/v1/auth/setup-admin`, `/api/v1/auth/setup-status`, `/api/v1/auth/request-password-reset`, `/health` | Sin cambios | No |
 | Auth | `http://auth-backend:3000` | `/api/v1/auth`, `/api/v1/staff`, `/api/v1/roles` y descendientes, salvo las excepciones anteriores | Sin cambios | Sí |
-| Menú | `http://menu-backend:8080` | `/api/v1/menu` y descendientes, incluido `/api/v1/menu/categories` | Sin cambios | Sí |
+| Menú | `http://menu-backend:8080` | `/api/v1/menu`, `/api/v1/media` y descendientes, incluido `/api/v1/menu/categories` | Sin cambios | Sí |
 | Órdenes | `http://orders-backend:8082` | `/api/v1/orders` y descendientes | Sin cambios | Sí |
-| Inventario | `http://inventory-backend:3000` | `/api/v1/inventory` y descendientes | Se elimina `/api/v1/inventory` | Sí |
+| Cocina (KDS) | `http://kitchen-backend:8086` | `/api/v1/kitchen` y descendientes | Sin cambios | Sí |
+| Inventario | `http://inventory-backend:3000` | `/api/v1/inventory` y descendientes (y rutas directas `/items`, `/suppliers`, `/recipes`, `/batches`, `/movements`, `/reservations`) | Se elimina `/api/v1/inventory` en `/api/v1/inventory/*` | Sí |
 | Pagos | `http://payments-backend:8084` | `/api/v1/payments` y descendientes | Sin cambios | Sí |
 | Piso | `http://floor-backend:8085` | `/api/v1/floor` y descendientes | Sin cambios | Sí |
 
