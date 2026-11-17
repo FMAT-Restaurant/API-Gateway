@@ -23,6 +23,7 @@ local values = {
   MENU_SERVICE_URL = os.getenv("MENU_SERVICE_URL") or "http://menu-backend:8080",
   INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL") or "http://inventory-backend:3000",
   ORDERS_SERVICE_URL = os.getenv("ORDERS_SERVICE_URL") or "http://orders-backend:8082",
+  KITCHEN_SERVICE_URL = os.getenv("KITCHEN_SERVICE_URL") or "http://kitchen-backend:8086",
   PAYMENTS_SERVICE_URL = os.getenv("PAYMENTS_SERVICE_URL") or "http://payments-backend:8084",
   FLOOR_SERVICE_URL = os.getenv("FLOOR_SERVICE_URL") or "http://floor-backend:8085",
 }
