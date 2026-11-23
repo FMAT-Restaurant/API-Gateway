@@ -44,6 +44,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
   - name: menu-service
     url: ${MENU_SERVICE_URL}
@@ -63,6 +65,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
   - name: orders-service
     url: ${ORDERS_SERVICE_URL}
@@ -81,6 +85,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
   - name: kitchen-service
     url: ${KITCHEN_SERVICE_URL}
@@ -99,6 +105,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
   - name: inventory-service
     url: ${INVENTORY_SERVICE_URL}
@@ -117,6 +125,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
       - name: inventory-direct-routes
         paths:
           - ~/items(/|$)
@@ -136,6 +146,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
   - name: payments-service
     url: ${PAYMENTS_SERVICE_URL}
@@ -154,6 +166,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
   - name: floor-service
     url: ${FLOOR_SERVICE_URL}
@@ -172,6 +186,8 @@ services:
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 
 plugins:
   - name: auth-perimeter

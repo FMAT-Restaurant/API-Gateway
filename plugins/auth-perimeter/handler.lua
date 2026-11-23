@@ -3,7 +3,7 @@ local jwt_parser = require "kong.plugins.jwt.jwt_parser"
 
 local AuthPerimeterHandler = {
   PRIORITY = 900,
-  VERSION = "1.1.0",
+  VERSION = "1.2.0",
 }
 
 local function invalid_claims()
@@ -26,6 +26,19 @@ local function valid_list(values)
   return count == #values
 end
 
+-- RFC 7519: "aud" puede ser una cadena o un arreglo de cadenas.
+local function audience_matches(aud, expected)
+  if type(aud) == "string" then
+    return aud == expected
+  end
+  if type(aud) == "table" then
+    for _, value in ipairs(aud) do
+      if value == expected then return true end
+    end
+  end
+  return false
+end
+
 function AuthPerimeterHandler:access(conf)
   kong.service.request.clear_header("X-User-Id")
   kong.service.request.clear_header("X-Staff-Id")
@@ -46,6 +59,10 @@ function AuthPerimeterHandler:access(conf)
   if not jwt or type(jwt.claims) ~= "table" then return invalid_claims() end
   local jwt_claims = jwt.claims
   if jwt_claims.iss ~= conf.issuer or not safe_value(jwt_claims.sub) then
+    return invalid_claims()
+  end
+  -- El plugin jwt de Kong solo verifica exp/nbf; la audiencia se valida aquí.
+  if not audience_matches(jwt_claims.aud, conf.audience) then
     return invalid_claims()
   end
   if jwt_claims.mustChangePassword ~= nil and type(jwt_claims.mustChangePassword) ~= "boolean" then

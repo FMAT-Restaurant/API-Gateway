@@ -13,12 +13,19 @@ for origin in (os.getenv("CORS_ORIGINS") or ""):gmatch("[^,]+") do
 end
 assert(#origins > 0, "CORS_ORIGINS is required")
 
+-- Audiencia esperada en los JWT (claim "aud"); debe coincidir con la que emite Auth-Backend.
+local audience = os.getenv("JWT_AUDIENCE") or ""
+audience = audience:match("^%s*(.-)%s*$")
+if audience == "" then audience = "urn:fmat:restaurant" end
+assert(audience:match("^[%w%.:%-_/]+$"), "JWT_AUDIENCE must be a plain identifier (e.g. urn:fmat:restaurant)")
+
 local input = assert(io.open("/usr/local/kong/declarative/kong.yml.template", "r"))
 local template = input:read("*a")
 input:close()
 local values = {
   JWT_SECRET_JSON = assert(json.encode(secret)),
   CORS_ORIGINS_JSON = assert(json.encode(origins)),
+  JWT_AUDIENCE_JSON = assert(json.encode(audience)),
   AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL") or "http://auth-backend:3000",
   MENU_SERVICE_URL = os.getenv("MENU_SERVICE_URL") or "http://menu-backend:8080",
   INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL") or "http://inventory-backend:3000",

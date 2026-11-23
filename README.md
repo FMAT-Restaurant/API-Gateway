@@ -19,6 +19,7 @@ docker compose logs -f kong
 | Variable | Uso |
 | --- | --- |
 | `JWT_SECRET` | Obligatoria, sin valor predeterminado; mínimo 32 bytes. |
+| `JWT_AUDIENCE` | Claim `aud` que deben traer los access tokens; por defecto `urn:fmat:restaurant`. Debe coincidir con `JWT_AUDIENCE` de Auth-Backend (`src/common/constants/security.constant.ts`). |
 | `CORS_ORIGINS` | Por defecto `http://localhost:5173,http://localhost:3000`. Orígenes HTTP/HTTPS explícitos con hostname o IPv4 y puerto opcional; sin comodines ni expresiones regulares. |
 | `KONG_PROXY_PORT` | Puerto del gateway para los clientes; por defecto `8000`. |
 | `KONG_ADMIN_PORT` | Puerto administrativo local; por defecto `8001`, publicado únicamente en `127.0.0.1`. |
@@ -129,9 +130,11 @@ Añade un elemento a `services` en `config/kong.yml`, ajustando DNS, puerto y pr
               uri_param_names: []
               cookie_names: []
           - name: auth-perimeter
+            config:
+              audience: ${JWT_AUDIENCE_JSON}
 ```
 
-Mantén **ambos plugins** en cada ruta protegida. `jwt` valida firma y expiración; `auth-perimeter`, cuya configuración predeterminada exige JWT, aplica el contrato de identidad y el bloqueo por contraseña temporal. La instancia global de `auth-perimeter` solo limpia encabezados de peticiones públicas; por sí sola no protege un servicio nuevo.
+Mantén **ambos plugins** en cada ruta protegida. `jwt` valida firma y expiración; `auth-perimeter`, cuya configuración predeterminada exige JWT, aplica el contrato de identidad (incluida la audiencia `aud`, que el plugin `jwt` de Kong no sabe verificar) y el bloqueo por contraseña temporal. La instancia global de `auth-perimeter` solo limpia encabezados de peticiones públicas; por sí sola no protege un servicio nuevo.
 
 Tras modificar configuración o variables:
 
@@ -148,6 +151,7 @@ Auth-Backend debe firmar access tokens con **HS256**, con el mismo secreto liter
 | Claim | Requisito |
 | --- | --- |
 | `iss` | Obligatorio: `urn:fmat:restaurant:auth`, coincidente con la credencial JWT y el emisor esperado por el plugin. |
+| `aud` | Obligatorio: igual a `JWT_AUDIENCE` (por defecto `urn:fmat:restaurant`), como cadena o dentro de un arreglo. Sin él, o con otro valor, Kong responde `401 Invalid identity claims`. |
 | `exp` | Obligatorio: fecha de expiración como número de segundos Unix, validada por Kong. |
 | `sub` | Obligatorio: identificador del usuario como cadena no vacía. |
 | `staffId` | Opcional: cadena no vacía o número entero. |
@@ -162,6 +166,7 @@ Ejemplo de payload, con `exp` calculado al emitir el token:
 ```js
 const claims = {
   iss: "urn:fmat:restaurant:auth",
+  aud: "urn:fmat:restaurant",
   sub: String(user.id),
   staffId: String(staff.id),
   roles: ["waiter"],

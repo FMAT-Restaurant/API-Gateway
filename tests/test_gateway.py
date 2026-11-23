@@ -9,16 +9,18 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 ISSUER = "urn:fmat:restaurant:auth"
+AUDIENCE = "urn:fmat:restaurant"
 
 
 class GatewayTests(unittest.TestCase):
     def lua(self):
         return LuaRuntime(unpack_returned_tuples=True)
 
-    def render(self, secret="a" * 32, origins="http://localhost:5173"):
+    def render(self, secret="a" * 32, origins="http://localhost:5173", audience=None):
         lua = self.lua()
         lua.globals().test_secret = secret
         lua.globals().test_origins = origins
+        lua.globals().test_audience = audience
         lua.globals().test_template = (ROOT / "config/kong.yml").read_text(encoding="utf-8")
 
         def encode(value):
@@ -32,6 +34,7 @@ class GatewayTests(unittest.TestCase):
           os.getenv = function(key)
             if key == "JWT_SECRET" then return test_secret end
             if key == "CORS_ORIGINS" then return test_origins end
+            if key == "JWT_AUDIENCE" then return test_audience end
           end
           io.open = function(path, mode)
             if mode == "r" then
@@ -53,6 +56,10 @@ class GatewayTests(unittest.TestCase):
         lua = self.lua()
         if claims is None:
             claims = {"iss": ISSUER, "sub": "user-1"}
+        # Todos los tokens de Auth traen "aud"; aud=None simula un token sin el claim.
+        claims = {"aud": AUDIENCE, **claims}
+        if claims["aud"] is None:
+            del claims["aud"]
         lua.globals().claims = lua.table_from(claims, recursive=True)
         lua.globals().request_path = path
         lua.globals().request_method = method
@@ -88,7 +95,8 @@ class GatewayTests(unittest.TestCase):
           }
         ''')
         handler = lua.execute((ROOT / "plugins/auth-perimeter/handler.lua").read_text(encoding="utf-8"))
-        handler.access(handler, lua.table_from({"require_jwt": required, "issuer": ISSUER}))
+        handler.access(handler, lua.table_from({"require_jwt": required, "issuer": ISSUER,
+                                                "audience": AUDIENCE}))
         return lua.globals().response_status, dict(lua.globals().headers.items()), lua.globals().response_body
 
     def test_verified_string_is_decoded_and_identity_replaces_spoofed_headers(self):
@@ -127,6 +135,34 @@ class GatewayTests(unittest.TestCase):
                 status, headers, _ = self.access(claims)
                 self.assertEqual(status, 401)
                 self.assertEqual(headers, {})
+
+    def test_audience_claim_is_required_and_must_match(self):
+        for aud in (None, "urn:fmat:otro", "", ["urn:fmat:otro"], {"x": AUDIENCE}, 123):
+            with self.subTest(aud=aud):
+                status, headers, _ = self.access({"iss": ISSUER, "sub": "123", "aud": aud})
+                self.assertEqual(status, 401)
+                self.assertEqual(headers, {})
+        # RFC 7519: "aud" también puede ser un arreglo que contenga la audiencia.
+        status, headers, _ = self.access({"iss": ISSUER, "sub": "123",
+                                          "aud": ["urn:fmat:otro", AUDIENCE]})
+        self.assertIsNone(status)
+        self.assertEqual(headers["X-User-Id"], "123")
+
+    def test_renderer_sets_audience_on_every_protected_route(self):
+        for env_value, expected in ((None, AUDIENCE), ("", AUDIENCE), ("  urn:fmat:restaurant:api ",
+                                                                         "urn:fmat:restaurant:api")):
+            with self.subTest(env_value=env_value):
+                config = self.render(audience=env_value)
+                routes = [r for s in config["services"] for r in s["routes"]]
+                protected = [r for r in routes if any(p["name"] == "jwt" for p in r.get("plugins", []))]
+                self.assertGreater(len(protected), 0)
+                for route in protected:
+                    perimeter = next(p for p in route["plugins"] if p["name"] == "auth-perimeter")
+                    self.assertEqual(perimeter["config"]["audience"], expected, route["name"])
+        for bad in ("urn:fmat restaurant", 'urn"x', "urn:${JWT_SECRET_JSON}"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(Exception):
+                    self.render(audience=bad)
 
     def test_renderer_preserves_yaml_special_characters(self):
         secret = 'a' * 32 + '\\"\n:#${JWT_SECRET_JSON}$&'
@@ -188,6 +224,7 @@ class GatewayTests(unittest.TestCase):
         fields = schema["fields"][3]["config"]["fields"]
         self.assertTrue(fields[1]["require_jwt"]["default"])
         self.assertEqual(fields[2]["issuer"]["default"], ISSUER)
+        self.assertEqual(fields[3]["audience"]["default"], AUDIENCE)
         global_plugin = next(p for p in self.render()["plugins"] if p["name"] == "auth-perimeter")
         self.assertFalse(global_plugin["config"]["require_jwt"])
 
