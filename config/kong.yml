@@ -209,10 +209,13 @@ plugins:
       headers:
         - Accept
         - Authorization
+        - Cache-Control
         - Content-Type
         - Idempotency-Key
         - If-Match
         - If-None-Match
+        - Last-Event-ID
+        - Pragma
         - X-Request-Id
         - X-Correlation-Id
       exposed_headers:
